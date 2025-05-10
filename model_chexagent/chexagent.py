@@ -7,12 +7,13 @@ from rich import print
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from transformers.utils.logging import set_verbosity_error
 
-set_verbosity_error()
+# set_verbosity_error()
 
 class CheXagent(object):
-    def __init__(self):
+    def __init__(self, model_name: str = "StanfordAIMI/CheXagent-2-3b"):
         # step 1: Setup constant
-        self.model_name = "StanfordAIMI/CheXagent-2-3b"
+        # "StanfordAIMI/CheXagent-8b"
+        self.model_name = model_name
         self.dtype = torch.bfloat16
         self.device = "cuda"
 
@@ -22,15 +23,29 @@ class CheXagent(object):
         self.model = self.model.to(self.dtype)
         self.model.eval()
 
-    def generate(self, paths, prompt):
-        # step 3: Inference
+    def get_input_ids(self, paths, prompt):
         query = self.tokenizer.from_list_format([*[{'image': path} for path in paths], {'text': prompt}])
         conv = [{"from": "system", "value": "You are a helpful assistant."}, {"from": "human", "value": query}]
         input_ids = self.tokenizer.apply_chat_template(conv, add_generation_prompt=True, return_tensors="pt")
-        output = self.model.generate(
-            input_ids.to(self.device), do_sample=False, num_beams=1, temperature=1., top_p=1., use_cache=True,
-            max_new_tokens=512
-        )[0]
+        return input_ids
+
+    def get_generation_output(self, input_ids, **kwargs):
+        if not kwargs:
+            kwargs = {
+                "do_sample": False,
+                "num_beams": 1,
+                "temperature": 1.,
+                "top_p": 1.,
+                "use_cache": True,
+                "max_new_tokens": 512
+            }
+        output = self.model.generate(input_ids.to(self.device), **kwargs)
+        return output
+
+    def generate(self, paths, prompt, **kwargs):
+        # step 3: Inference
+        input_ids = self.get_input_ids(paths, prompt)
+        output = self.get_generation_output(input_ids, **kwargs)[0]
         response = self.tokenizer.decode(output[input_ids.size(1):-1])
         return response
 
