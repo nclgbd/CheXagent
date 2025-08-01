@@ -1,0 +1,16 @@
+{
+    "folders": [
+        {
+            "name": "chexagent",
+            "path": "/home/nicoleg/workspaces/CheXagent"
+        },
+        {
+            "name": "mimic-cxr-jpg",
+            "path": "/home/nicoleg/physionet.org/files/mimic-cxr-jpg/2.0.0"
+        },
+    ],
+    "settings": {
+        "hide-files.files": []
+    }
+
+}
