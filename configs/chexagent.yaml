@@ -1,0 +1,26 @@
+defaults:
+  - _self_
+  - override hydra/hydra_logging: colorlog
+  - override hydra/job_logging: colorlog
+
+name: label-extraction
+dry_run: false
+push_to_hub: true
+date: ${now:%Y-%m-%d}
+timestamp: ${now:%H-%M-%S}
+dataset: vllm-pneumonia-detection/mimic-cxr-orig-dataset
+data_dir: /home/nicoleg/physionet.org/files/mimic-cxr-jpg/2.0.0
+batched: false
+batch_size:
+positive_class: Pneumonia
+with_rank: false
+model_id: StanfordAIMI/CheXagent-2-3b
+
+hydra:
+  job:
+    chdir: true
+  sweep:
+    dir: outputs/${hydra.job.config_name}/${date}/${timestamp}
+    subdir: ${hydra.job.override_dirname}
+  run:
+    dir: outputs/${hydra.job.config_name}/${date}/${timestamp}
