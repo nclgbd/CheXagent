@@ -1,16 +1,16 @@
 {
     "folders": [
         {
+            "name": "chexagent",
+            "path": "../../CheXagent"
+        },
+        {
             "name": "rtk",
             "path": "../../ResearchToolKit"
         },
         {
             "name": "chexagent-2-3b",
             "path": "../../CheXagent-2-3b"
-        },
-        {
-            "name": "chexagent",
-            "path": "../../CheXagent"
         },
         // {
         //     "name": "chexbert",

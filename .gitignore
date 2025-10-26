@@ -136,3 +136,4 @@ result
 outputs/
 mlartifacts/
 mlruns/
+logs/

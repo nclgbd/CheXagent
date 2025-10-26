@@ -1,11 +1,16 @@
 #! /usr/bin/env python3
-""" """
+"""
+SCRIPT_NAME=label_extraction
+`nohup python scripts/${SCRIPT_NAME}.py > logs/${SCRIPT_NAME}.log 2>&1 &`
+`tail -f logs/${SCRIPT_NAME}.log`
+"""
 import hydra
 import os
 import textwrap
 import warnings
 from PIL import Image
 from dotenv import load_dotenv
+from datetime import datetime
 from multiprocess import set_start_method
 from omegaconf import DictConfig, OmegaConf
 from rich import pretty, print, traceback
@@ -24,14 +29,21 @@ from mlflow.data.huggingface_dataset import HuggingFaceDataset, HuggingFaceDatas
 from model_chexagent.chexagent import CheXagent
 
 # rtk
+from rtk.metrics import generate_classification_report, METRICS_DIR
 from rtk.utils import get_console, get_logger, intro
-from rtk.metrics import generate_classification_report
 
+get_logger("mlflow").setLevel("ERROR")
 MLFLOW_TRACKING_URI = "http://localhost:5000"
 warnings.filterwarnings("ignore", category=FutureWarning)
 warnings.filterwarnings("ignore", category=UserWarning)
 pretty.install()
-console = Console()
+console = get_console()
+logger = get_logger(
+    "".join(["scripts/", __file__.split("/")[-1].split(".")[0], f".main"]),
+    # console=console,
+    level="DEBUG",
+)
+# get_logger("mlflow").setLevel("DEBUG")
 
 
 def log_params(args: DictConfig):
@@ -40,132 +52,93 @@ def log_params(args: DictConfig):
     return params
 
 
-# def generate_classification_report(
-#     y_true,
-#     y_pred,
-#     target_names=[f"No Pneumonia", "Pneumonia"],
-#     split: str = "validate",
-#     results_dir: str = "results",
-# ):
-#     import pandas as pd
-#     from sklearn.metrics import classification_report, confusion_matrix
-#     from tabulate import tabulate
+def log_results(data: DatasetDict, args: DictConfig):
 
-#     os.makedirs(results_dir, exist_ok=True)
-
-#     # Confusion matrix
-#     console.print(Markdown(f"## Confusion Matrix for '{split}'"))
-#     cfm = confusion_matrix(y_true, y_pred)
-#     if cfm.shape[0] < 2:
-#         if y_true[0] == 0:
-#             cfm = [[cfm[0][0], 0], [0, 0]]
-#         else:
-#             cfm = [[0, 0], [0, cfm[0][0]]]
-#     tbl = tabulate(
-#         cfm, headers=target_names, showindex=target_names, tablefmt="rounded_grid"
-#     )
-#     print(tbl)
-#     cfm_df = pd.DataFrame(cfm, index=target_names, columns=target_names)
-#     cfm_df.to_csv(f"{results_dir}/{split}_confusion_matrix.csv")
-
-#     # Classification report
-#     cr_string = classification_report(
-#         y_true, y_pred, labels=target_names, target_names=target_names
-#     )
-#     cr = classification_report(
-#         y_true, y_pred, labels=target_names, target_names=target_names, output_dict=True
-#     )
-#     console.print(Markdown(f"## Classification Report for '{split}'"))
-#     print(cr_string)
-#     metrics = {
-#         f"{split}_f1": round(cr["macro avg"]["f1-score"], 4),
-#         f"{split}_sensitivity": round(cr["Pneumonia"]["recall"], 4),
-#         f"{split}_specificity": round(cr["No Pneumonia"]["recall"], 4),
-#         f"{split}_recall": round(cr["macro avg"]["recall"], 4),
-#         f"{split}_precision": round(cr["macro avg"]["precision"], 4),
-#         f"{split}_accuracy": round(cr.get("accuracy", 0.0), 4),
-#     }
-#     summary = pd.DataFrame(
-#         metrics,
-#         index=["chexagent"],
-#     )
-#     summary.to_csv(f"{results_dir}/{split}_classification_summary.csv")
-#     mlflow.log_metrics(metrics, step=0)
-
-
-def log_results(ds: Dataset, args: DictConfig, log_test=False):
-    data = []
-    split_names = []
-
-    if args.dry_run:
-        split_names = ["validate"]
-        data.append(ds)
-    else:
-        split_names = ["train", "validate"]
-        train_ds = ds.filter(lambda x: x["split"] == "train")
-        data.append(train_ds)
-        val_ds = ds.filter(lambda x: x["split"] == "validate")
-        data.append(val_ds)
-        if log_test:
-            split_names.append("test")
-            test_ds = ds.filter(lambda x: x["split"] == "test")
-            data.append(test_ds)
-
-    for split, ds in zip(split_names, data):
-        console.log(f"Logging '{split}' results...")
-        os.makedirs("data", exist_ok=True)
+    for split, data in data.items():
+        logger.info(f"Logging '{split}' results...")
+        # os.makedirs("data", exist_ok=True)
         source = HuggingFaceDatasetSource(path=args.dataset, split=split)
         mlflow_ds = HuggingFaceDataset(
-            ds=ds,
+            ds=data,
             source=source,
             name="".join([args.dataset.split("/")[-1], f":{split}"]),
         )
         mlflow.log_input(mlflow_ds, context="binary_prediction")
         for col in args.target_columns:
-            y_true = ds[col]
+            y_true = list(data[col])
             y_true = [1 if _ == 1 else 0 for _ in y_true]
             new_col = f"{col}-{args.model_id.split('/')[-1]}"
-            y_pred = ds[new_col]
-            generate_classification_report(
+            y_pred = list(data[new_col])
+            summary_dict = generate_classification_report(
                 y_true,
                 y_pred,
                 split=split,
                 target_names=[f"No {col}", f"{col}"],
+                log=True,
             )
+            mlflow.log_metrics(summary_dict, model_id=args.model_id, step=0)
 
-    data_dict = dict(zip(split_names, data))
-    new_ds = DatasetDict(data_dict)
-    return new_ds
+    # return new_data
+
+
+# def create_dataset_card(args: DictConfig, log=False):
+#     import mlflow
+
+#     run = mlflow.active_run()
+#     run_info = run.info
+#     # run_id = run_info.run_id
+#     # run_name = run_info.run_name
+#     # experiment_id = run_info.experiment_id
+#     card_content = f"# {title}\n\n{description}"
+#     with open("README.md", "w") as f:
+#         f.write(card_content)
+#     console.print(Markdown(card_content))
+#     logger.info("Dataset card created at 'README.md'")
+#     if log:
+#         mlflow.set_tag("mlflow.note.content", card_content)
+#     return card_content
 
 
 @hydra.main(config_path="../configs", config_name="chexagent", version_base="1.1")
 def main(args: DictConfig):
     intro(args)
+    load_dotenv(args.get("env_file", None))
+    name = args.get("name", "label-extraction")
+    prefix = args.get("prefix", "-test") if args.dry_run else ""
     target_columns = args.get("target_columns", [args.positive_class])
 
-    console.log(f"Loading dataset: '{args.dataset}'")
-    ds = load_dataset(
-        args.dataset, split="validate" if args.dry_run else "train+validate+test"
-    )
-    ds = ds.remove_columns(
+    logger.info(f"Loading dataset: '{args.dataset}'")
+    data: DatasetDict = load_dataset(args.dataset)
+    if args.dry_run:
+        data.pop("train")
+    data = data.remove_columns(
         [
             "multiclass_labels",
             "Enlarged Cardiomediastinum",
             "Fracture",
             "Lung Lesion",
             "Lung Opacity",
-            "No Finding",
             "Pleural Other",
             "Pneumothorax",
             "Support Devices",
         ]
     )
+    gt_500_dataset = load_dataset("vllm-pneumonia-detection/mimic-500-gt")
+    gt_test_dicom_ids = gt_500_dataset["test"].to_pandas()["dicom_id"].tolist()
+    data["test"] = data["test"].filter(lambda x: x["dicom_id"] in gt_test_dicom_ids)
 
     # pipeline testing
-    # if args.dry_run:
-    #     ds = ds.shuffle(42).select(range(10))
+    if args.dry_run:
+        gt_val_dicom_ids = gt_500_dataset["validate"].to_pandas()["dicom_id"].tolist()
+        data["validate"] = data["validate"].filter(
+            lambda x: x["dicom_id"] in gt_val_dicom_ids
+        )
+        data["test"] = (
+            data["test"].shuffle(seed=42).select(range(len(gt_val_dicom_ids)))
+        )
 
-    console.log(f"Dataset loaded. Loading chexagent model:")
+    console.print(data)
+    logger.info(f"Dataset loaded. Loading '{args.model_id}' model")
     model = CheXagent(model_name=args.model_id, dtype=torch.float32)
     yes_no = {"yes": 1, "no": 0}
     model_name: str = args.model_id.split("/")[-1]
@@ -175,14 +148,16 @@ def main(args: DictConfig):
 
         for col in target_columns:
             if example["findings"] or example["impressions"]:
-                text = " ".join([example["findings"], example["impressions"]])
+                text = " ".join([example["findings"], example["impressions"]]).strip()
             else:
                 text = example["reports"].strip()
             prompt = textwrap.dedent(
                 f"""
                 Consider the following chest X-ray description:
-
+                
+                ```
                 {text}
+                ```
 
                 Does this chest X-ray contain a {col}?
                 """
@@ -191,22 +166,25 @@ def main(args: DictConfig):
             y_pred = yes_no[response]
             new_col = f"{col}-{model_name}"
             example[new_col] = y_pred
-            # example["chexagent"] = y_pred
         return example
 
-    console.log("Creating CheXagent labels....")
+    # logger.info(f"Creating {args.model} labels....")
     with_rank = args.get("with_rank", False)
     num_proc = torch.cuda.device_count() if with_rank else None
 
     # mlflow
     mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
-    run_name = f"{args.name}-{args.date}-{args.timestamp}"
-    experiment = mlflow.set_experiment(args.name)
-    with mlflow.start_run(run_name=run_name, experiment_id=experiment.experiment_id):
+    experiment_name = f"{name}{prefix}"
+    run_name = f"{name}-{args.date}-{args.timestamp}"
+    experiment = mlflow.set_experiment(experiment_name)
+    with mlflow.start_run(
+        run_name=run_name, experiment_id=experiment.experiment_id
+    ) as run:
         mlflow.autolog()
         log_params(args)
         with torch.inference_mode():
-            labelled_ds = ds.map(
+            logger.info(f"Get binary labels for {args.target_columns}")
+            labelled_ds = data.map(
                 get_response_with_report,
                 batched=args.get("batched", False),
                 batch_size=args.batch_size,
@@ -214,25 +192,50 @@ def main(args: DictConfig):
                 num_proc=num_proc,
                 desc="In progress",
             )
-        new_ds = log_results(labelled_ds, args, log_test=not args.dry_run)
+
+        logger.info(f"Inference complete. Logging results to mlflow")
+        log_results(labelled_ds, args)
+        # card_content = create_dataset_card(args)
         mlflow.log_artifacts(".", artifact_path="outputs")
 
         push_to_hub = args.get("push_to_hub", False)
         if push_to_hub or not args.dry_run:
-            repo = "nclgbd" if args.dry_run else "vllm-pneumonia-detection"
+            logger.info(
+                "Label extraction results saved to mlflow. Pushing results to 🤗"
+            )
+            from huggingface_hub import HfApi
+
+            api = HfApi()
+            repo = args.get(
+                "repo", "nclgbd" if args.dry_run else "vllm-pneumonia-detection"
+            )
             dataset_name = "mimic-cxr-labelled-dataset"
-            suffix = "-test" if args.dry_run else ""
-            path = f"{repo}/{dataset_name}{suffix}"
-            mlflow.log_param("dataset_hub_path", path)
-            console.log(f"Pushing to hub: '{path}'...")
-            commit = new_ds.push_to_hub(
+            path = f"{repo}/{dataset_name}{prefix}"
+            logger.info(f"Pushing to hub: '{path}'...")
+            commit = labelled_ds.push_to_hub(
                 path,
                 private=True,
+                create_pr=True,
+                commit_message=f"mlflow.run_id: '{run.info.run_id}'",
             )
-            print(commit)
+            try:
+                revision = commit.pr_revision
+                api.upload_folder(
+                    folder_path=".",
+                    path_in_repo="outputs",
+                    repo_id=path,
+                    repo_type="dataset",
+                    revision=revision,
+                )
+                tags = commit.__dict__
+                mlflow.set_tags(tags)
+                logger.info(f"Commit url: {commit}")
+            except Exception as e:
+                logger.error(e)
+                api.delete_branch(repo_id=path, branch=revision, repo_type="dataset")
 
         else:
-            console.log(f"Not pushing to hub. Exiting...")
+            logger.info(f"Not pushing to hub. Exiting...")
 
 
 if __name__ == "__main__":
