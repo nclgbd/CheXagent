@@ -1,17 +1,14 @@
-extra-index-url https://download.pytorch.org/whl/cu118
+# extra-index-url https://download.pytorch.org/whl/cu118
 Pillow
 accelerate
 albumentations
-datasets==3.6.0
 einops
 matplotlib
-numpy==1.26.3
 opencv-python
 protobuf
 pyarrow
 rich
 sentencepiece
-timm
-torch==2.1.2 # may work with more recent version
-torchvision==0.16.2
+torch==2.7.1 # may work with more recent version
+torchvision==0.22.1
 transformers==4.40.0

@@ -23,6 +23,10 @@ from mlflow.data.huggingface_dataset import HuggingFaceDataset, HuggingFaceDatas
 # chexagent
 from model_chexagent.chexagent import CheXagent
 
+# rtk
+from rtk.utils import get_console, get_logger, intro
+from rtk.metrics import generate_classification_report
+
 MLFLOW_TRACKING_URI = "http://localhost:5000"
 warnings.filterwarnings("ignore", category=FutureWarning)
 warnings.filterwarnings("ignore", category=UserWarning)
@@ -36,57 +40,57 @@ def log_params(args: DictConfig):
     return params
 
 
-def generate_classification_report(
-    y_true,
-    y_pred,
-    target_names=[f"No Pneumonia", "Pneumonia"],
-    split: str = "validate",
-    results_dir: str = "results",
-):
-    import pandas as pd
-    from sklearn.metrics import classification_report, confusion_matrix
-    from tabulate import tabulate
+# def generate_classification_report(
+#     y_true,
+#     y_pred,
+#     target_names=[f"No Pneumonia", "Pneumonia"],
+#     split: str = "validate",
+#     results_dir: str = "results",
+# ):
+#     import pandas as pd
+#     from sklearn.metrics import classification_report, confusion_matrix
+#     from tabulate import tabulate
 
-    os.makedirs(results_dir, exist_ok=True)
+#     os.makedirs(results_dir, exist_ok=True)
 
-    # Confusion matrix
-    console.print(Markdown(f"## Confusion Matrix for '{split}'"))
-    cfm = confusion_matrix(y_true, y_pred)
-    if cfm.shape[0] < 2:
-        if y_true[0] == 0:
-            cfm = [[cfm[0][0], 0], [0, 0]]
-        else:
-            cfm = [[0, 0], [0, cfm[0][0]]]
-    tbl = tabulate(
-        cfm, headers=target_names, showindex=target_names, tablefmt="rounded_grid"
-    )
-    print(tbl)
-    cfm_df = pd.DataFrame(cfm, index=target_names, columns=target_names)
-    cfm_df.to_csv(f"{results_dir}/{split}_confusion_matrix.csv")
+#     # Confusion matrix
+#     console.print(Markdown(f"## Confusion Matrix for '{split}'"))
+#     cfm = confusion_matrix(y_true, y_pred)
+#     if cfm.shape[0] < 2:
+#         if y_true[0] == 0:
+#             cfm = [[cfm[0][0], 0], [0, 0]]
+#         else:
+#             cfm = [[0, 0], [0, cfm[0][0]]]
+#     tbl = tabulate(
+#         cfm, headers=target_names, showindex=target_names, tablefmt="rounded_grid"
+#     )
+#     print(tbl)
+#     cfm_df = pd.DataFrame(cfm, index=target_names, columns=target_names)
+#     cfm_df.to_csv(f"{results_dir}/{split}_confusion_matrix.csv")
 
-    # Classification report
-    cr_string = classification_report(
-        y_true, y_pred, labels=target_names, target_names=target_names
-    )
-    cr = classification_report(
-        y_true, y_pred, labels=target_names, target_names=target_names, output_dict=True
-    )
-    console.print(Markdown(f"## Classification Report for '{split}'"))
-    print(cr_string)
-    metrics = {
-        f"{split}_f1": round(cr["macro avg"]["f1-score"], 4),
-        f"{split}_sensitivity": round(cr["Pneumonia"]["recall"], 4),
-        f"{split}_specificity": round(cr["No Pneumonia"]["recall"], 4),
-        f"{split}_recall": round(cr["macro avg"]["recall"], 4),
-        f"{split}_precision": round(cr["macro avg"]["precision"], 4),
-        f"{split}_accuracy": round(cr.get("accuracy", 0.0), 4),
-    }
-    summary = pd.DataFrame(
-        metrics,
-        index=["chexagent"],
-    )
-    summary.to_csv(f"{results_dir}/{split}_classification_summary.csv")
-    mlflow.log_metrics(metrics, step=0)
+#     # Classification report
+#     cr_string = classification_report(
+#         y_true, y_pred, labels=target_names, target_names=target_names
+#     )
+#     cr = classification_report(
+#         y_true, y_pred, labels=target_names, target_names=target_names, output_dict=True
+#     )
+#     console.print(Markdown(f"## Classification Report for '{split}'"))
+#     print(cr_string)
+#     metrics = {
+#         f"{split}_f1": round(cr["macro avg"]["f1-score"], 4),
+#         f"{split}_sensitivity": round(cr["Pneumonia"]["recall"], 4),
+#         f"{split}_specificity": round(cr["No Pneumonia"]["recall"], 4),
+#         f"{split}_recall": round(cr["macro avg"]["recall"], 4),
+#         f"{split}_precision": round(cr["macro avg"]["precision"], 4),
+#         f"{split}_accuracy": round(cr.get("accuracy", 0.0), 4),
+#     }
+#     summary = pd.DataFrame(
+#         metrics,
+#         index=["chexagent"],
+#     )
+#     summary.to_csv(f"{results_dir}/{split}_classification_summary.csv")
+#     mlflow.log_metrics(metrics, step=0)
 
 
 def log_results(ds: Dataset, args: DictConfig, log_test=False):
@@ -109,14 +113,6 @@ def log_results(ds: Dataset, args: DictConfig, log_test=False):
 
     for split, ds in zip(split_names, data):
         console.log(f"Logging '{split}' results...")
-        y_true = ds[args.positive_class]
-        y_true = [1 if _ == 1 else 0 for _ in y_true]
-        y_pred = ds["chexagent"]
-        generate_classification_report(
-            y_true,
-            y_pred,
-            split=split,
-        )
         os.makedirs("data", exist_ok=True)
         source = HuggingFaceDatasetSource(path=args.dataset, split=split)
         mlflow_ds = HuggingFaceDataset(
@@ -125,6 +121,17 @@ def log_results(ds: Dataset, args: DictConfig, log_test=False):
             name="".join([args.dataset.split("/")[-1], f":{split}"]),
         )
         mlflow.log_input(mlflow_ds, context="binary_prediction")
+        for col in args.target_columns:
+            y_true = ds[col]
+            y_true = [1 if _ == 1 else 0 for _ in y_true]
+            new_col = f"{col}-{args.model_id.split('/')[-1]}"
+            y_pred = ds[new_col]
+            generate_classification_report(
+                y_true,
+                y_pred,
+                split=split,
+                target_names=[f"No {col}", f"{col}"],
+            )
 
     data_dict = dict(zip(split_names, data))
     new_ds = DatasetDict(data_dict)
@@ -133,16 +140,8 @@ def log_results(ds: Dataset, args: DictConfig, log_test=False):
 
 @hydra.main(config_path="../configs", config_name="chexagent", version_base="1.1")
 def main(args: DictConfig):
-    console.clear()
-    config_str = OmegaConf.to_yaml(args, resolve=True)
-    console.print(Markdown("## Configuration\n\n"))
-    config_str = textwrap.dedent(
-        f"""
-        ```yaml
-{config_str}
-        """
-    ).strip()
-    console.print(Markdown(config_str))
+    intro(args)
+    target_columns = args.get("target_columns", [args.positive_class])
 
     console.log(f"Loading dataset: '{args.dataset}'")
     ds = load_dataset(
@@ -151,16 +150,11 @@ def main(args: DictConfig):
     ds = ds.remove_columns(
         [
             "multiclass_labels",
-            "Atelectasis",
-            "Cardiomegaly",
-            "Consolidation",
-            "Edema",
             "Enlarged Cardiomediastinum",
             "Fracture",
             "Lung Lesion",
             "Lung Opacity",
             "No Finding",
-            "Effusion",
             "Pleural Other",
             "Pneumothorax",
             "Support Devices",
@@ -174,26 +168,30 @@ def main(args: DictConfig):
     console.log(f"Dataset loaded. Loading chexagent model:")
     model = CheXagent(model_name=args.model_id, dtype=torch.float32)
     yes_no = {"yes": 1, "no": 0}
+    model_name: str = args.model_id.split("/")[-1]
 
     def get_response_with_report(example: dict):
         image_file = os.path.join(args.data_dir, example["image_files"])
-        if example["findings"] or example["impressions"]:
-            text = " ".join([example["findings"], example["impressions"]])
-        else:
-            text = example["reports"].strip()
 
-        prompt = textwrap.dedent(
-            f"""
-            Consider the following chest X-ray description:
+        for col in target_columns:
+            if example["findings"] or example["impressions"]:
+                text = " ".join([example["findings"], example["impressions"]])
+            else:
+                text = example["reports"].strip()
+            prompt = textwrap.dedent(
+                f"""
+                Consider the following chest X-ray description:
 
-            {text}
+                {text}
 
-            Does this chest X-ray contain a {args.positive_class}?
-            """
-        )
-        response = model.generate([image_file], prompt).lower().strip()
-        y_pred = yes_no[response]
-        example["chexagent"] = y_pred
+                Does this chest X-ray contain a {col}?
+                """
+            )
+            response = model.generate([image_file], prompt).lower().strip()
+            y_pred = yes_no[response]
+            new_col = f"{col}-{model_name}"
+            example[new_col] = y_pred
+            # example["chexagent"] = y_pred
         return example
 
     console.log("Creating CheXagent labels....")
@@ -207,7 +205,7 @@ def main(args: DictConfig):
     with mlflow.start_run(run_name=run_name, experiment_id=experiment.experiment_id):
         mlflow.autolog()
         log_params(args)
-        with torch.inference_mode(), torch.cuda.amp.autocast():
+        with torch.inference_mode():
             labelled_ds = ds.map(
                 get_response_with_report,
                 batched=args.get("batched", False),

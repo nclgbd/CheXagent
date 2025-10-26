@@ -4,17 +4,24 @@ defaults:
   - override hydra/job_logging: colorlog
 
 name: label-extraction
-dry_run: false
+dry_run: true
 push_to_hub: true
 date: ${now:%Y-%m-%d}
 timestamp: ${now:%H-%M-%S}
 dataset: vllm-pneumonia-detection/mimic-cxr-orig-dataset
-data_dir: /home/nicoleg/physionet.org/files/mimic-cxr-jpg/2.0.0
+data_dir: /data/nicoleg/datasets/physionet.org/files/mimic-cxr-jpg/2.1.0
 batched: false
 batch_size:
 positive_class: Pneumonia
 with_rank: false
 model_id: StanfordAIMI/CheXagent-2-3b
+target_columns:
+  - Atelectasis
+  - Cardiomegaly
+  - Consolidation
+  - Edema
+  - Effusion
+  - ${positive_class}
 
 hydra:
   job:
