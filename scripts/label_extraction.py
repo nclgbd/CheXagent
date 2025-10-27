@@ -1,6 +1,6 @@
 #! /usr/bin/env python3
 """
-SCRIPT_NAME=label_extraction
+export SCRIPT_NAME=label_extraction
 nohup python scripts/${SCRIPT_NAME}.py > logs/${SCRIPT_NAME}.log 2>&1 &
 tail -f logs/${SCRIPT_NAME}.log
 """
@@ -80,24 +80,6 @@ def log_results(data: DatasetDict, args: DictConfig):
     # return new_data
 
 
-# def create_dataset_card(args: DictConfig, log=False):
-#     import mlflow
-
-#     run = mlflow.active_run()
-#     run_info = run.info
-#     # run_id = run_info.run_id
-#     # run_name = run_info.run_name
-#     # experiment_id = run_info.experiment_id
-#     card_content = f"# {title}\n\n{description}"
-#     with open("README.md", "w") as f:
-#         f.write(card_content)
-#     console.print(Markdown(card_content))
-#     logger.info("Dataset card created at 'README.md'")
-#     if log:
-#         mlflow.set_tag("mlflow.note.content", card_content)
-#     return card_content
-
-
 @hydra.main(config_path="../configs", config_name="chexagent", version_base="1.1")
 def main(args: DictConfig):
     intro(args, "CheXagent Label Extraction")
@@ -114,20 +96,14 @@ def main(args: DictConfig):
     columns_to_remove = list(
         filter(lambda x: x not in target_columns, MIMIC_CLASS_NAMES)
     )
-    columns_to_remove.append("multiclass_labels")
     data = data.remove_columns(columns_to_remove)
-    gt_500_dataset = load_dataset("vllm-pneumonia-detection/mimic-500-gt")
-    gt_test_dicom_ids = gt_500_dataset["test"].to_pandas()["dicom_id"].tolist()
-    data["test"] = data["test"].filter(lambda x: x["dicom_id"] in gt_test_dicom_ids)
+    data["test"] = data["test"].filter(lambda x: x["gt"])
 
     # pipeline testing
     if args.dry_run:
-        gt_val_dicom_ids = gt_500_dataset["validate"].to_pandas()["dicom_id"].tolist()
-        data["validate"] = data["validate"].filter(
-            lambda x: x["dicom_id"] in gt_val_dicom_ids
-        )
+        data["validate"] = data["validate"].filter(lambda x: x["gt"])
         data["test"] = (
-            data["test"].shuffle(seed=42).select(range(len(gt_val_dicom_ids) // 2))
+            data["test"].shuffle(seed=42).select(range(len(data["validate"]) // 2))
         )
 
     console.print(data)
@@ -137,7 +113,7 @@ def main(args: DictConfig):
     import transformers
 
     transformers.logging.set_verbosity_error()
-    model = CheXagent(model_name=args.model_id)  # , dtype=torch.float32)
+    model = CheXagent(model_name=args.model_id)
     yes_no = {"yes": 1, "no": 0}
     model_name: str = args.model_id.split("/")[-1]
 
@@ -171,11 +147,10 @@ def main(args: DictConfig):
                 example[new_col] = y_pred
             except KeyError as e:
                 logger.warn(f"Invalid response returned. See: {debug_info}")
-                example[new_col] = -9
+                example[new_col] = 0
 
         return example
 
-    # logger.info(f"Creating {args.model} labels....")
     with_rank = args.get("with_rank", False)
     num_proc = torch.cuda.device_count() if with_rank else None
 
@@ -205,7 +180,6 @@ def main(args: DictConfig):
 
         logger.info(f"Inference complete. Logging results to mlflow")
         log_results(labelled_ds, args)
-        # card_content = create_dataset_card(args)
         mlflow.log_artifacts(".", artifact_path="outputs")
 
         push_to_hub = args.get("push_to_hub", False)
