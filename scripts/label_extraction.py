@@ -1,8 +1,8 @@
 #! /usr/bin/env python3
 """
 SCRIPT_NAME=label_extraction
-`nohup python scripts/${SCRIPT_NAME}.py > logs/${SCRIPT_NAME}.log 2>&1 &`
-`tail -f logs/${SCRIPT_NAME}.log`
+nohup python scripts/${SCRIPT_NAME}.py > logs/${SCRIPT_NAME}.log 2>&1 &
+tail -f logs/${SCRIPT_NAME}.log
 """
 import hydra
 import os
@@ -29,6 +29,7 @@ from mlflow.data.huggingface_dataset import HuggingFaceDataset, HuggingFaceDatas
 from model_chexagent.chexagent import CheXagent
 
 # rtk
+from rtk._datasets.mimic import MIMIC_CLASS_NAMES
 from rtk.metrics import generate_classification_report, METRICS_DIR
 from rtk.utils import get_console, get_logger, intro
 
@@ -109,18 +110,12 @@ def main(args: DictConfig):
     data: DatasetDict = load_dataset(args.dataset)
     if args.dry_run:
         data.pop("train")
-    data = data.remove_columns(
-        [
-            "multiclass_labels",
-            "Enlarged Cardiomediastinum",
-            "Fracture",
-            "Lung Lesion",
-            "Lung Opacity",
-            "Pleural Other",
-            "Pneumothorax",
-            "Support Devices",
-        ]
+
+    columns_to_remove = list(
+        filter(lambda x: x not in target_columns, MIMIC_CLASS_NAMES)
     )
+    columns_to_remove.append("multiclass_labels")
+    data = data.remove_columns(columns_to_remove)
     gt_500_dataset = load_dataset("vllm-pneumonia-detection/mimic-500-gt")
     gt_test_dicom_ids = gt_500_dataset["test"].to_pandas()["dicom_id"].tolist()
     data["test"] = data["test"].filter(lambda x: x["dicom_id"] in gt_test_dicom_ids)
@@ -142,7 +137,7 @@ def main(args: DictConfig):
     import transformers
 
     transformers.logging.set_verbosity_error()
-    model = CheXagent(model_name=args.model_id, dtype=torch.float32)
+    model = CheXagent(model_name=args.model_id)  # , dtype=torch.float32)
     yes_no = {"yes": 1, "no": 0}
     model_name: str = args.model_id.split("/")[-1]
 
@@ -202,7 +197,7 @@ def main(args: DictConfig):
                 labelled_ds = data.map(
                     get_response_with_report,
                     batched=args.get("batched", False),
-                    batch_size=args.batch_size,
+                    batch_size=args.get("batch_size", None),
                     with_rank=with_rank,
                     num_proc=num_proc,
                     desc="In progress",
@@ -231,7 +226,7 @@ def main(args: DictConfig):
                 path,
                 private=True,
                 create_pr=True,
-                commit_message=f"mlflow.run_id: '{run.info.run_id}'",
+                commit_description=f"`mlflow.run_id`: '{run.info.run_id}'",
             )
             try:
                 revision = commit.pr_revision
