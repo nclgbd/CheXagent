@@ -1,8 +1,7 @@
 #! /usr/bin/env python3
 """
 export SCRIPT_NAME=label_extraction
-nohup python scripts/${SCRIPT_NAME}.py > logs/${SCRIPT_NAME}.log 2>&1 &
-tail -f logs/${SCRIPT_NAME}.log
+python scripts/${SCRIPT_NAME}.py
 """
 import hydra
 import os
@@ -10,8 +9,6 @@ import textwrap
 import warnings
 from PIL import Image
 from dotenv import load_dotenv
-from datetime import datetime
-from multiprocess import set_start_method
 from omegaconf import DictConfig, OmegaConf
 from rich import pretty, print, traceback
 from rich.console import Console
@@ -29,7 +26,7 @@ from mlflow.data.huggingface_dataset import HuggingFaceDataset, HuggingFaceDatas
 from model_chexagent.chexagent import CheXagent
 
 # rtk
-from rtk._datasets.mimic import MIMIC_CLASS_NAMES
+from rtk.datasets import MIMIC_CLASS_NAMES
 from rtk.metrics import generate_classification_report, METRICS_DIR
 from rtk.utils import get_console, get_logger, intro
 
@@ -146,7 +143,7 @@ def main(args: DictConfig):
                 y_pred = yes_no[response]
                 example[new_col] = y_pred
             except KeyError as e:
-                logger.warn(f"Invalid response returned. See: {debug_info}")
+                logger.error(f"Invalid response returned. See: {debug_info}")
                 example[new_col] = 0
 
         return example

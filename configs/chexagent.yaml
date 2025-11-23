@@ -17,6 +17,10 @@ positive_class: Pneumonia
 with_rank: false
 model_id: StanfordAIMI/CheXagent-2-3b
 target_columns:
+  - Atelectasis
+  - Cardiomegaly
+  - Consolidation
+  - Edema
   - Effusion
   - Pneumonia
 
