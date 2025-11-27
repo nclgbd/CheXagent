@@ -49,7 +49,7 @@ def log_params(args: DictConfig):
 
 
 def log_results(data: DatasetDict, args: DictConfig):
-
+    positive_class = args.positive_class
     for split, data in data.items():
         logger.info(f"Logging '{split}' results...")
         # os.makedirs("data", exist_ok=True)
@@ -60,19 +60,19 @@ def log_results(data: DatasetDict, args: DictConfig):
             name="".join([args.dataset.split("/")[-1], f":{split}"]),
         )
         mlflow.log_input(mlflow_ds, context="binary_prediction")
-        for col in args.target_columns:
-            y_true = list(data[col])
-            y_true = [1 if _ == 1 else 0 for _ in y_true]
-            new_col = f"{col}-{args.model_id.split('/')[-1]}"
-            y_pred = list(data[new_col])
-            summary_dict = generate_classification_report(
-                y_true,
-                y_pred,
-                split=split,
-                target_names=[f"No {col}", f"{col}"],
-                log=True,
-            )
-            mlflow.log_metrics(summary_dict, model_id=args.model_id, step=0)
+        # for col in args.target_columns:
+        y_true = list(data[positive_class])
+        y_true = [1 if _ == 1 else 0 for _ in y_true]
+        new_col = f"{positive_class}-{args.model_id.split('/')[-1]}"
+        y_pred = list(data[new_col])
+        summary_dict = generate_classification_report(
+            y_true,
+            y_pred,
+            split=split,
+            target_names=[f"No {positive_class}", f"{positive_class}"],
+            log=True,
+        )
+        mlflow.log_metrics(summary_dict, model_id=args.model_id, step=0)
 
     # return new_data
 
@@ -81,19 +81,20 @@ def log_results(data: DatasetDict, args: DictConfig):
 def main(args: DictConfig):
     intro(args, "CheXagent Label Extraction")
     load_dotenv(args.get("env_file", None))
-    name = args.get("name", "label-extraction")
-    prefix = args.get("prefix", "-test") if args.dry_run else ""
-    target_columns = args.get("target_columns", [args.positive_class])
+    name: str = args.get("name", "label-extraction")
+    prefix: str = args.get("prefix", "-test") if args.dry_run else ""
+    positive_class: str = args.get("positive_class")
+    # target_columns = args.get("target_columns", [args.positive_class])
 
     logger.info(f"Loading dataset: '{args.dataset}'")
     data: DatasetDict = load_dataset(args.dataset)
     if args.dry_run:
         data.pop("train")
 
-    columns_to_remove = list(
-        filter(lambda x: x not in target_columns, MIMIC_CLASS_NAMES)
-    )
-    data = data.remove_columns(columns_to_remove)
+    # columns_to_remove = list(
+    #     filter(lambda x: x not in target_columns, MIMIC_CLASS_NAMES)
+    # )
+    # data = data.remove_columns(columns_to_remove)
     data["test"] = data["test"].filter(lambda x: x["gt"])
 
     # pipeline testing
@@ -117,34 +118,34 @@ def main(args: DictConfig):
     def get_response_with_report(example: dict):
         image_file = os.path.join(args.data_dir, example["image_files"])
 
-        for col in target_columns:
-            if example["findings"] or example["impressions"]:
-                text = " ".join([example["findings"], example["impressions"]]).strip()
-            else:
-                text = example["reports"].strip()
-            prompt = textwrap.dedent(
-                f"""
-                Consider the following chest X-ray description:
+        # for col in target_columns:
+        if example["findings"] or example["impressions"]:
+            text = " ".join([example["findings"], example["impressions"]]).strip()
+        else:
+            text = example["reports"].strip()
+        prompt = textwrap.dedent(
+            f"""
+            Consider the following chest X-ray description:
 
-                {text}
+            {text}
 
-                Does this chest X-ray contain a {col}?
-                """
-            ).strip()
-            response = model.generate([image_file], prompt).lower().strip()
-            debug_info = {
-                "prompt": prompt,
-                "response": response,
-                "dicom_id": example["dicom_id"],
-            }
-            logger.debug(debug_info)
-            new_col = f"{col}-{model_name}"
-            try:
-                y_pred = yes_no[response]
-                example[new_col] = y_pred
-            except KeyError as e:
-                logger.error(f"Invalid response returned. See: {debug_info}")
-                example[new_col] = 0
+            Does this chest X-ray contain a {positive_class}?
+            """
+        ).strip()
+        response = model.generate([image_file], prompt).lower().strip()
+        debug_info = {
+            "prompt": prompt,
+            "response": response,
+            "dicom_id": example["dicom_id"],
+        }
+        logger.debug(debug_info)
+        new_col = f"{positive_class}-{model_name}"
+        try:
+            y_pred = yes_no[response]
+            example[new_col] = y_pred
+        except KeyError as e:
+            logger.error(f"Invalid response returned. See: {debug_info}")
+            example[new_col] = 0
 
         return example
 
@@ -162,7 +163,7 @@ def main(args: DictConfig):
         mlflow.autolog()
         log_params(args)
         with console.status(
-            f"\t[bold]Getting binary labels for [green]'{args.target_columns}'[/green][/bold]\n",
+            f"\t[bold]Getting binary labels for [green]'{positive_class}'[/green][/bold]\n",
             spinner="arrow3",
         ):
             with torch.inference_mode():
@@ -190,8 +191,27 @@ def main(args: DictConfig):
             repo = args.get(
                 "repo", "nclgbd" if args.dry_run else "vllm-pneumonia-detection"
             )
-            dataset_name = "mimic-cxr-labelled-dataset"
-            path = f"{repo}/{dataset_name}{prefix}"
+            dataset_name = f"mimic-cxr-labelled-dataset{prefix}"
+            path = f"{repo}/{dataset_name}"
+            # Check if repo exists
+            if api.list_datasets(search=dataset_name, author=repo):
+                cur_dataset = load_dataset(path)
+                new_col = f"{positive_class}-{model_name}"
+                if new_col in cur_dataset.column_names["validate"]:
+                    logger.info(
+                        f"Column '{new_col}' already exists in dataset. Overwriting..."
+                    )
+                    cur_dataset = cur_dataset.remove_columns([new_col, positive_class])
+                for split_name, ds_split in cur_dataset.items():
+                    cur_dataset[split_name] = ds_split.add_column(
+                        name=new_col,
+                        column=labelled_ds[split_name][new_col],
+                    )
+                    cur_dataset[split_name] = cur_dataset[split_name].add_column(
+                        name=positive_class,
+                        column=labelled_ds[split_name][positive_class],
+                    )
+                labelled_ds = cur_dataset
             logger.info(f"Pushing to hub: '{path}'...")
             commit = labelled_ds.push_to_hub(
                 path,
