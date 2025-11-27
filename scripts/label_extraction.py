@@ -204,14 +204,15 @@ def main(args: DictConfig):
                     cur_dataset = cur_dataset.remove_columns([new_col, positive_class])
                 for split_name, ds_split in cur_dataset.items():
                     cur_dataset[split_name] = ds_split.add_column(
-                        name=new_col,
-                        column=labelled_ds[split_name][new_col],
-                    )
-                    cur_dataset[split_name] = cur_dataset[split_name].add_column(
                         name=positive_class,
                         column=labelled_ds[split_name][positive_class],
                     )
+                    cur_dataset[split_name] = cur_dataset[split_name].add_column(
+                        name=new_col,
+                        column=labelled_ds[split_name][new_col],
+                    )
                 labelled_ds = cur_dataset
+
             logger.info(f"Pushing to hub: '{path}'...")
             commit = labelled_ds.push_to_hub(
                 path,
