@@ -133,3 +133,7 @@ result
 # Pycharm
 .idea/
 
+outputs/
+mlartifacts/
+mlruns/
+logs/

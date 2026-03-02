@@ -1,0 +1,19 @@
+# extra-index-url https://download.pytorch.org/whl/cu118
+Pillow
+accelerate
+albumentations
+datasets
+einops
+hydra-core
+matplotlib
+mlflow
+opencv-python
+protobuf
+pyarrow
+python-dotenv
+rich
+sentencepiece
+tabulate
+torch==2.7.1 # may work with more recent version
+torchvision==0.22.1
+transformers==4.40.0

@@ -1,5 +1,10 @@
 from model_chexagent.chexagent import CheXagent
 from rich import print
+import warnings
+
+warnings.filterwarnings("ignore")
+warnings.filterwarnings("ignore", category=UserWarning, module="transformers")
+warnings.filterwarnings("ignore", category=FutureWarning, module="transformers")
 
 
 def main():

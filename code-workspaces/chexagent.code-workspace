@@ -1,0 +1,28 @@
+{
+    "folders": [
+        {
+            "name": "chexagent",
+            "path": "../../CheXagent"
+        },
+        {
+            "name": "rtk",
+            "path": "../../ResearchToolKit"
+        },
+        {
+            "name": "chexagent-2-3b",
+            "path": "../../CheXagent-2-3b"
+        },
+        // {
+        //     "name": "chexbert",
+        //     "path": "../../CheXbert"
+        // },
+        {
+            "name": "mimic-cxr-jpg",
+            "path": "/data/nicoleg/datasets/physionet.org/files/mimic-cxr-jpg/2.1.0"
+        }
+    ],
+    "settings": {
+        "hide-files.files": [],
+        "discord.enabled": true
+    },
+}
